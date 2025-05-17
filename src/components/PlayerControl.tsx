@@ -1,4 +1,6 @@
-import { useKeyboardControls } from "@react-three/drei";
+import { useGameStore } from "@/stores/gameStore";
+
+import { OrbitControls, useKeyboardControls } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import {
 	type RapierRigidBody,
@@ -6,9 +8,9 @@ import {
 	type RigidBodyProps,
 } from "@react-three/rapier";
 import { useControls } from "leva";
-import { useEffect, useRef } from "react";
-import { type Group, MathUtils, Vector3 } from "three";
-import { degToRad } from "three/src/math/MathUtils.js";
+import { useRef } from "react";
+import { type Group, Vector3 } from "three";
+import { MathUtils, degToRad } from "three/src/math/MathUtils.js";
 import { PlayerMesh } from "./PlayerMesh";
 
 const normalizeAngle = (angle: number) => {
@@ -36,12 +38,20 @@ const lerpAngle = (start: number, end: number, t: number) => {
 };
 
 export const PlayerController = (props: RigidBodyProps) => {
-	const { SPEED, ROTATION_SPEED } = useControls("Character Control", {
-		SPEED: { value: 2.5, min: 0.1, max: 4, step: 0.1 },
-		ROTATION_SPEED: {
-			value: 1.5,
+	const { mazeSize } = useGameStore();
+	const { SPEED, ROTATION_SPEED, CAMERA_TYPE } = useControls(
+		"Character Control",
+		{
+			SPEED: { value: 2.5, min: 0.1, max: 4, step: 0.1 },
+			ROTATION_SPEED: {
+				value: 1.5,
+			},
+			CAMERA_TYPE: {
+				value: "follow",
+				options: ["follow", "free", "top-down"],
+			},
 		},
-	});
+	);
 	const rb = useRef<RapierRigidBody>(null);
 	const container = useRef<Group>(null);
 	const character = useRef<Group>(null);
@@ -87,18 +97,31 @@ export const PlayerController = (props: RigidBodyProps) => {
 			movement.x = -1;
 		}
 
-		if (movement.x !== 0) {
-			rotationTarget.current += degToRad(ROTATION_SPEED) * movement.x;
-		}
+		if (CAMERA_TYPE === 'follow') {
+			// Camera-relative movement
+			if (movement.x !== 0) {
+				rotationTarget.current += degToRad(ROTATION_SPEED) * movement.x;
+			}
 
-		if (movement.x !== 0 || movement.z !== 0) {
-			characterRotationTarget.current = Math.atan2(movement.x, movement.z);
-			vel.x =
-				Math.sin(rotationTarget.current + characterRotationTarget.current) *
-				SPEED;
-			vel.z =
-				Math.cos(rotationTarget.current + characterRotationTarget.current) *
-				SPEED;
+			if (movement.x !== 0 || movement.z !== 0) {
+				characterRotationTarget.current = Math.atan2(movement.x, movement.z);
+				vel.x = Math.sin(rotationTarget.current + characterRotationTarget.current) * SPEED;
+				vel.z = Math.cos(rotationTarget.current + characterRotationTarget.current) * SPEED;
+			}
+		} else if (CAMERA_TYPE === 'free') {
+			// World-space movement (free camera)
+			if (movement.x !== 0 || movement.z !== 0) {
+				characterRotationTarget.current = Math.atan2(movement.x, movement.z);
+				vel.x = movement.x * SPEED;
+				vel.z = movement.z * SPEED;
+			}
+		} else if (CAMERA_TYPE === 'top-down') {
+			// Top-down movement (screen-space)
+			if (movement.x !== 0 || movement.z !== 0) {
+				characterRotationTarget.current = Math.atan2(movement.x, movement.z);
+				vel.x = -movement.x * SPEED; // Inverted for intuitive screen-space movement
+				vel.z = -movement.z * SPEED; // Inverted for intuitive screen-space movement
+			}
 		}
 
 		character.current.rotation.y = lerpAngle(
@@ -109,33 +132,49 @@ export const PlayerController = (props: RigidBodyProps) => {
 
 		rb.current.setLinvel(vel, true);
 
-		// CAMERA
-		container.current.rotation.y = MathUtils.lerp(
-			container.current.rotation.y,
-			rotationTarget.current,
-			0.1,
-		);
+		if (CAMERA_TYPE === "follow") {
+			// Third-person follow camera
+			container.current.rotation.y = MathUtils.lerp(
+				container.current.rotation.y,
+				rotationTarget.current,
+				0.1,
+			);
 
-		cameraPosition.current.getWorldPosition(cameraWorldPosition.current);
-		camera.position.lerp(cameraWorldPosition.current, 0.1);
+			cameraPosition.current.getWorldPosition(cameraWorldPosition.current);
+			camera.position.lerp(cameraWorldPosition.current, 0.1);
 
-		if (cameraTarget.current) {
-			cameraTarget.current.getWorldPosition(cameraLookAtWorldPosition.current);
-			cameraLookAt.current.lerp(cameraLookAtWorldPosition.current, 0.1);
+			if (cameraTarget.current) {
+				cameraTarget.current.getWorldPosition(
+					cameraLookAtWorldPosition.current,
+				);
+				cameraLookAt.current.lerp(cameraLookAtWorldPosition.current, 0.1);
 
-			camera.lookAt(cameraLookAt.current);
+				camera.lookAt(cameraLookAt.current);
+			}
+		} else if (CAMERA_TYPE === "top-down") {
+			// Top-down camera
+			const position = rb.current.translation();
+			camera.position.x = position.x;
+			camera.position.y = position.y + 10; // Height of camera
+			camera.position.z = position.z;
+			camera.lookAt(position.x, position.y, position.z);
 		}
 	});
 
 	return (
-		<RigidBody colliders="ball" lockRotations ref={rb} {...props}>
-			<group ref={container}>
-				<group ref={cameraTarget} position-z={0.5} />
-				<group ref={cameraPosition} position-y={2} position-z={0} />
-				<group ref={character}>
-					<PlayerMesh />
+		<>
+			{CAMERA_TYPE === "free" ? (
+				<OrbitControls target={[mazeSize / 2, mazeSize * 1.5, mazeSize / 2]} />
+			) : null}
+			<RigidBody colliders="ball" lockRotations ref={rb} {...props}>
+				<group ref={container}>
+					<group ref={cameraTarget} position-z={0.5} />
+					<group ref={cameraPosition} position-y={1.5} position-z={0} />
+					<group ref={character}>
+						<PlayerMesh />
+					</group>
 				</group>
-			</group>
-		</RigidBody>
+			</RigidBody>
+		</>
 	);
 };
