@@ -1,0 +1,1 @@
+I want to create a maze game using react three fiber, with rapier as the physics engine. The maze should be procedurally generated. player should be able to move around the maze using keyboard arrows. or WASD keys.
