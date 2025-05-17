@@ -25,7 +25,7 @@ function Game() {
 		<div style={{ width: "100vw", height: "100vh" }}>
 			<GameHUD />
 			<Canvas>
-				<Physics debug key={JSON.stringify(maze)}>
+				<Physics key={JSON.stringify(maze)}>
 					<directionalLight position={[0, 10, 0]} intensity={1} />
 					<ambientLight intensity={0.5} />
 					<Maze />
